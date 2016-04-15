@@ -64,7 +64,7 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     for(std::vector<char*>::iterator it = rvm->segname.begin(); it != rvm->segname.end(); it++){
         if (!strcmp(*it, segname)) {
             fprintf(stderr, "map %s with size %d failed\n", segname, size_to_create);
-            return NULL;
+            return (void*) -1;
         }
     }
 
@@ -127,6 +127,8 @@ void rvm_destroy(rvm_t rvm, const char *segname){
    begin a transaction that will modify the segments listed in segbases. If any of the specified segments is already being modified by a transaction, then the call should fail and return (trans_t) -1. Note that trans_t needs to be able to be typecasted to an integer type.
    */
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
+    // TODO If any of the specified segments is already being modified by a transaction, the call should fail and return (trans_t) -1.
+    
     RVM_transaction *transaction = (RVM_transaction*) malloc (sizeof(RVM_transaction));
     transaction->id = rvm->transID++;
     transaction->numsegs = numsegs;
@@ -136,12 +138,6 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
         transaction->length.push_back(std::vector<int>());
         transaction->undo.push_back(std::vector<char*>());
     }
-/*    
-    transaction->offset = (std::vector<int>*) malloc (asizeof(std::vector<int>) * numsegs);
-    transaction->length = (std::vector<int>*) malloc (sizeof(std::vector<int>) * numsegs);
-    transaction->undo = (std::vector<char*>*) malloc (sizeof(std::vector<char*>) * numsegs);
-*/
-
     rvm->transaction.push_back(transaction);
     printf("trans[%d] begin\n", transaction->id);
     return transaction->id;
@@ -152,6 +148,7 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
    */
 void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size){
     RVM_transaction *transaction = getTransaction(tid);
+
     if(transaction != NULL){
         for(int i=0; i<transaction->numsegs; i++){
             if(transaction->segbases[i] == segbase){
@@ -177,7 +174,7 @@ void rvm_commit_trans(trans_t tid){
     RVM_transaction *transaction = getTransaction(tid);
     if(transaction != NULL){
         FILE *log = rvm->log_file;
-        fwrite("TB", 1, 2, log);
+        fwrite("TBegin", 1, 2, log);
         fwrite(&transaction->numlog, sizeof(int), 1, log);
         
         for(int i=0; i<transaction->numsegs; i++){
@@ -190,7 +187,7 @@ void rvm_commit_trans(trans_t tid){
                 fwrite((char*)transaction->segbases[i] + transaction->offset[i][j], sizeof(char), transaction->length[i][j], log);
             }
         }
-        fwrite("TE", 1, 2, log);
+        fwrite("TEnd", 1, 2, log);
         freeTransaction(transaction);
     }
 }
@@ -229,7 +226,18 @@ void freeTransaction(RVM_transaction* transaction){
             free(transaction->undo[i][j]);
         }
     }
+
+
+    for(std::vector<RVM_transaction*>::iterator it = rvm->transaction.begin(); it != rvm->transaction.end(); it++){
+        if((*it)->id == transaction->id){
+            rvm->transaction.erase(it);
+            break;
+        }
+    }
+
     printf("trans[%d] finished\n", transaction->id);
+
+
 }
 
 RVM_transaction *getTransaction(trans_t tid){
