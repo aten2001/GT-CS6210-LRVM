@@ -3,10 +3,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 
 RecoverableVM* rvm = NULL;
 
@@ -40,6 +44,29 @@ rvm_t rvm_init(const char *directory){
         fclose(logID_file);
     }
 
+    // Find minimum log id. It will be used to truncate log.
+    rvm->log_id_min = rvm->log_id;
+    struct dirent *dp;
+    DIR *dir = opendir(directory);
+    unsigned long int n;
+    while ((dp=readdir(dir)) != NULL) {
+        if(strncmp(dp->d_name, ".log", 2) == 0) {
+            n = atoi(&(dp->d_name[4]));
+            if(n < rvm->log_id_min) {
+                rvm->log_id_min = n;
+            }
+        }
+    }
+    closedir(dir);
+
+    rvm_truncate_log(rvm);
+    rvm->log_id = 0;
+
+    // Update logID
+    logID_file = fopen(logId_path, "w");
+    fprintf(logID_file, "%lu", rvm->log_id + 1);
+    fclose(logID_file);
+
     // Create Log file
     char log_path[strlen(directory) + 20];
     sprintf(log_path, "%s/.log%lu", directory, rvm->log_id);
@@ -47,11 +74,6 @@ rvm_t rvm_init(const char *directory){
 
     // Initial transaction metadata
     rvm->transID = 0;
-
-    // Update logID
-    logID_file = fopen(logId_path, "w");
-    fprintf(logID_file, "%lu", ++rvm->log_id);
-    fclose(logID_file);
 
     return rvm;
 }
@@ -71,14 +93,22 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     char *file_name = (char*) malloc (sizeof(char) * (strlen(rvm->directory) + strlen(segname) + 1));
     sprintf(file_name, "%s/%s", rvm->directory, segname);
 
-    FILE *target = fopen(file_name, "wb");
+    int fd = open(file_name, O_RDWR | O_CREAT);
+    struct stat sb;
+    fstat(fd, &sb);
+    if(sb.st_size < (size_to_create * sizeof(char))) {
+        //printf("size = %d\n", (int)sb.st_size);
+        ftruncate(fd, (size_to_create * sizeof(char)));
+    }
     char *mem = (char*) malloc (sizeof(char) * size_to_create);
-    fread(mem, 1, size_to_create, target);
+    read(fd, (void*)mem, sizeof(char) * size_to_create);
+    close(fd);
 
     char *name = (char*) malloc (sizeof(char) * strlen(segname));
     strncpy(name, segname, strlen(segname));
     rvm->segname.push_back(name);
     rvm->segmem.push_back(mem);
+
     return mem;
 }
 
@@ -181,7 +211,7 @@ void rvm_commit_trans(trans_t tid){
             const char *segname = getSegname(transaction->segbases[i]);
             for(unsigned int j=0; j<transaction->offset[i].size(); j++){
                 printf("\tcommit\t[%s]\toffset: %d, size: %d\n", segname, transaction->offset[i][j], transaction->length[i][j]);
-                fwrite(segname, sizeof(char), strlen(segname), log);
+                fwrite(segname, sizeof(char), strlen(segname) + 1, log);
                 fwrite(&transaction->offset[i][j], sizeof(int), 1, log);
                 fwrite(&transaction->length[i][j], sizeof(int), 1, log);
                 fwrite((char*)transaction->segbases[i] + transaction->offset[i][j], sizeof(char), transaction->length[i][j], log);
@@ -212,12 +242,96 @@ void rvm_abort_trans(trans_t tid){
    play through any committed or aborted items in the log file(s) and shrink the log file(s) as much as possible.
    */
 void rvm_truncate_log(rvm_t rvm){
-
-
+    unsigned long int id;
+    for (id = rvm->log_id_min; id < rvm->log_id; id++) {
+        printf("truncate %lu\n", id);
+        truncateLog(rvm, id);
+    }
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+int checkTransaction(rvm_t rvm, char *cur, char *end) {
+    if (cur >= end) return -1;
+    return 0;
+}
+
+char* redoTransaction(rvm_t rvm, char *cur, char *end) {
+    char seg_path[strlen(rvm->directory) + 20];
+    int fd = -1;
+    struct stat sb;
+
+    char *previousSegname = NULL;
+    char *segname;
+    char *segbase = NULL;
+
+    int numlog, offset, length;
+    if(checkTransaction(rvm, cur, end) < 0) return NULL;
+    cur += 2;
+    numlog = *((int*)cur);
+    cur += sizeof(int);
+    while(numlog) {
+        segname = cur;
+        cur += strlen(segname) + 1;
+        offset = *((int*)cur);
+        cur += sizeof(int);
+        length = *((int*)cur);
+        cur += sizeof(int);
+        printf("%s %d %d\n", segname, offset, length);
+        if (!previousSegname || strcmp(segname, previousSegname) != 0) {
+            if (segbase) {
+                printf("unmap %s\n", previousSegname);
+                munmap(segbase, sb.st_size);
+                close(fd);
+            }
+            printf("mmap %s\n", segname);
+            sprintf(seg_path, "%s/%s", rvm->directory, segname);
+            fd = open(seg_path, O_RDWR);
+            if (fd == -1) return NULL;
+            if (fstat(fd, &sb) == -1) return NULL;
+            segbase = (char*)mmap(NULL, sb.st_size, PROT_WRITE, MAP_SHARED, fd, 0);
+            previousSegname = segname;
+        }
+        memcpy(segbase + offset, cur, length);
+        cur += length;
+        numlog--;
+    }
+
+    if (segbase) {
+        printf("unmap %s\n", previousSegname);
+        munmap(segbase, sb.st_size);
+        close(fd);
+    }
+
+    cur += 2;
+    return cur;    
+}
+
+void truncateLog(rvm_t rvm, unsigned long int id) {
+    char log_path[strlen(rvm->directory) + 20];
+    int fd;
+    struct stat sb;
+    char *addr;
+    char *cur;
+    char *end;
+    
+    sprintf(log_path, "%s/.log%lu", rvm->directory, id);
+    fd = open(log_path, O_RDONLY);
+    if (fd == -1) return;
+    if (fstat(fd, &sb) == -1) return;
+    addr = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    cur = addr;
+    end = addr + sb.st_size;
+    printf("log size = %d\n", (int)sb.st_size);
+    while(cur) {
+        cur = redoTransaction(rvm, cur, end);
+    }
+    munmap(addr, sb.st_size);
+    close(fd);
+    unlink(log_path);
+}
+
 void freeTransaction(RVM_transaction* transaction){
     if(transaction == NULL) return;
 

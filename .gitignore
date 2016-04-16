@@ -26,3 +26,6 @@
 *.exe
 *.out
 *.app
+
+rvm_segments
+testcases/bin

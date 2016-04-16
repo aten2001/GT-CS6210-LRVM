@@ -1,8 +1,7 @@
 #!/bin/bash
-for i in `ls testcases\\`; do
+for i in `ls testcases/bin\\`; do
     echo $i
-    g++ -I. -g "testcases/$i" librvm.a 
-    ./a.out
+    "./testcases/bin/$i"
     echo ""
 done
 

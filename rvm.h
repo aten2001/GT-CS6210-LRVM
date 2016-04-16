@@ -30,6 +30,7 @@ struct RecoverableVM{
     std::vector<RVM_transaction*> transaction;
     
     unsigned long int log_id;
+    unsigned long int log_id_min;
     FILE *log_file;
 };
 
@@ -48,4 +49,5 @@ void rvm_truncate_log(rvm_t rvm);
 void freeTransaction(RVM_transaction* transaction);
 RVM_transaction *getTransaction(trans_t tid);
 const char *getSegname(void* segbase);
+void truncateLog(rvm_t rvm, unsigned long int id);
 #endif
