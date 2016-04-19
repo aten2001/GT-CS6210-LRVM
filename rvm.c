@@ -14,17 +14,24 @@
 
 RecoverableVM* rvm = NULL;
 
-/*
-   Initialize the library with the specified directory as backing store.
-   */
+/* Initialize the library with the specified directory as backing store. */
+int nameCMP(seqsrchst_key a, seqsrchst_key b){
+    return !strcmp((char*) a, (char*) b);
+}
+
+int baseCMP(seqsrchst_key a, seqsrchst_key b){
+    return a == b;
+}
+
 rvm_t rvm_init(const char *directory){
     if(rvm != NULL){
-        //TODO
+        fprintf(stderr, "Multiple RVM instances detected\n");
+        return NULL;
     }
 
     rvm = (RecoverableVM*) malloc (sizeof(RecoverableVM));
-    rvm->directory = (char*) malloc (sizeof(char) * strlen(directory));
-    strncpy(rvm->directory, directory, strlen(directory));
+    rvm->directory = (char*) malloc (sizeof(char) * (strlen(directory)+1));
+    strncpy(rvm->directory, directory, strlen(directory)+1);
 
     // Create Directory
     struct stat st;
@@ -72,9 +79,10 @@ rvm_t rvm_init(const char *directory){
     sprintf(log_path, "%s/.log%lu", directory, rvm->log_id);
     rvm->log_file = fopen(log_path, "wb+");
 
-    // Initial transaction metadata
+    // Initial Internal data structure
     rvm->transID = 0;
-
+    seqsrchst_init(&rvm->segnameMap, baseCMP);
+    seqsrchst_init(&rvm->segbaseMap, nameCMP);
     return rvm;
 }
 
@@ -83,71 +91,56 @@ rvm_t rvm_init(const char *directory){
    */
 void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     // If segname is already mapped, return immediate
-    for(std::vector<char*>::iterator it = rvm->segname.begin(); it != rvm->segname.end(); it++){
-        if (!strcmp(*it, segname)) {
-            fprintf(stderr, "map %s with size %d failed\n", segname, size_to_create);
-            return (void*) -1;
-        }
+    if(getSegbase(segname) != NULL){
+        fprintf(stderr, "map %s with size %d failed\n", segname, size_to_create);
+        return (void*) -1;
     }
 
-    char *file_name = (char*) malloc (sizeof(char) * (strlen(rvm->directory) + strlen(segname) + 1));
+    // Open file and truncate to size_to_create
+    char file_name[strlen(rvm->directory) + strlen(segname) + 1];
     sprintf(file_name, "%s/%s", rvm->directory, segname);
 
-    int fd = open(file_name, O_RDWR | O_CREAT);
+    int fd = open(file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
     struct stat sb;
     fstat(fd, &sb);
-    if(sb.st_size < (size_to_create * sizeof(char))) {
-        //printf("size = %d\n", (int)sb.st_size);
+    if((unsigned long) sb.st_size < (size_to_create * sizeof(char))) {
         ftruncate(fd, (size_to_create * sizeof(char)));
     }
+
+    // Read data from disk, load to memory
     char *mem = (char*) malloc (sizeof(char) * size_to_create);
     read(fd, (void*)mem, sizeof(char) * size_to_create);
     close(fd);
-
-    char *name = (char*) malloc (sizeof(char) * strlen(segname));
-    strncpy(name, segname, strlen(segname));
-    rvm->segname.push_back(name);
-    rvm->segmem.push_back(mem);
-
+    
+    // Create internal data structure mapping
+    char *name = (char*) malloc (sizeof(char) * strlen(segname) + 1);
+    strncpy(name, segname, strlen(segname)+1);
+    seqsrchst_put(&rvm->segnameMap, mem, name);
+    seqsrchst_put(&rvm->segbaseMap, name, mem);
     return mem;
 }
 
-/*
-   unmap a segment from memory.
-   */
+/* unmap a segment from memory. */
 void rvm_unmap(rvm_t rvm, void *segbase){
-    int index = -1;
-    for(unsigned int i=0; i<rvm->segmem.size(); i++){
-        if(rvm->segmem[i] == segbase) {
-            index = i;
-            break;
-        }
+    // if segbase is not currently mapped, return immediately.
+    if(getSegname(segbase) == NULL){
+        fprintf(stderr, "unmap %p failed\n", segbase);
+        return;
     }
 
-    if(index >= 0){
-        void *name = rvm->segname[index];
-        void *mem = rvm->segmem[index];
-        rvm->segmem.erase(rvm->segmem.begin() + index);
-        rvm->segname.erase(rvm->segname.begin() + index);
-        free(name);
-        free(mem);
-    } else {
-        fprintf(stderr, "unmap %p failed\n", segbase);
-    }
+    // delete internal data structure mapping
+    removeMapping(segbase);
 }
 
-/*
-   destroy a segment completely, erasing its backing store. This function should not be called on a segment that is currently mapped.
-   */
+/* destroy a segment completely, erasing its backing store. This function should not be called on a segment that is currently mapped. */
 void rvm_destroy(rvm_t rvm, const char *segname){
     // if segname is current mapped, return immediately
-    for(std::vector<char*>::iterator it = rvm->segname.begin(); it != rvm->segname.end(); it++){
-        if (!strcmp(*it, segname)) {
-            fprintf(stderr, "destory segname %s failed\n", segname);
-            return;
-        }
+    if(getSegbase(segname) != NULL){
+        fprintf(stderr, "destory segname %s failed\n", segname);
+        return;
     }
 
+    // delete disk hard-copy
     char filename[strlen(rvm->directory) + strlen(segname) + 1];
     sprintf(filename, "%s/%s", rvm->directory, segname);
     unlink(filename);
@@ -157,18 +150,28 @@ void rvm_destroy(rvm_t rvm, const char *segname){
    begin a transaction that will modify the segments listed in segbases. If any of the specified segments is already being modified by a transaction, then the call should fail and return (trans_t) -1. Note that trans_t needs to be able to be typecasted to an integer type.
    */
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
-    // TODO If any of the specified segments is already being modified by a transaction, the call should fail and return (trans_t) -1.
-    
+    // If any segbases is modified by other transaction, return immediately
+    for(int i=0; i<numsegs; i++){
+        int size = steque_size(&rvm->transaction);
+        for(int j=0; j<size; j++){
+            RVM_transaction* transaction = (RVM_transaction*) steque_pop(&rvm->transaction);
+            steque_push(&rvm->transaction, transaction);
+
+            for(int k=0; k<transaction->numsegs; k++){
+                if(segbases[i] == transaction->segbases[k]){
+                    fprintf(stderr, "begin trans %p failed\n", segbases[i]);
+                    return (trans_t) -1;
+                }
+            }
+        }
+    }
+
     RVM_transaction *transaction = (RVM_transaction*) malloc (sizeof(RVM_transaction));
     transaction->id = rvm->transID++;
     transaction->numsegs = numsegs;
     transaction->segbases = segbases;
-    for(int i=0; i<numsegs; i++){
-        transaction->offset.push_back(std::vector<int>());
-        transaction->length.push_back(std::vector<int>());
-        transaction->undo.push_back(std::vector<char*>());
-    }
-    rvm->transaction.push_back(transaction);
+
+    steque_push(&rvm->transaction, transaction);
     printf("trans[%d] begin\n", transaction->id);
     return transaction->id;
 }
@@ -182,57 +185,53 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size){
     if(transaction != NULL){
         for(int i=0; i<transaction->numsegs; i++){
             if(transaction->segbases[i] == segbase){
-
                 printf("\tmodify\t[%s]\toffset: %d, size: %d\n", getSegname(segbase), offset, size);
-                transaction->offset[i].push_back(offset);
-                transaction->length[i].push_back(size);
+                log_t *record = (log_t*) malloc (sizeof(log_t));
+                record->segID = i;
+                record->offset = offset;
+                record->length = size;
+                record->mem = (char*) malloc (sizeof(char) * size);
+                memcpy(record->mem, (char*) transaction->segbases[i] + offset, size);
 
-                char *backup = (char*) malloc (sizeof(char) * size);
-                memcpy(backup, (char*) transaction->segbases[i] + offset, size);
-                transaction->undo[i].push_back(backup);
-                transaction->numlog++;
+                steque_push(&transaction->log, record);
                 return;
             }
         }
     }
 }
 
-/*
-   commit all changes that have been made within the specified transaction. When the call returns, then enough information should have been saved to disk so that, even if the program crashes, the changes will be seen by the program when it restarts.
-   */
+/* commit all changes that have been made within the specified transaction. When the call returns, then enough information should have been saved to disk so that, even if the program crashes, the changes will be seen by the program when it restarts. */
+
 void rvm_commit_trans(trans_t tid){
     RVM_transaction *transaction = getTransaction(tid);
     if(transaction != NULL){
         FILE *log = rvm->log_file;
-        fwrite("TBegin", 1, 2, log);
-        fwrite(&transaction->numlog, sizeof(int), 1, log);
-        
-        for(int i=0; i<transaction->numsegs; i++){
-            const char *segname = getSegname(transaction->segbases[i]);
-            for(unsigned int j=0; j<transaction->offset[i].size(); j++){
-                printf("\tcommit\t[%s]\toffset: %d, size: %d\n", segname, transaction->offset[i][j], transaction->length[i][j]);
-                fwrite(segname, sizeof(char), strlen(segname) + 1, log);
-                fwrite(&transaction->offset[i][j], sizeof(int), 1, log);
-                fwrite(&transaction->length[i][j], sizeof(int), 1, log);
-                fwrite((char*)transaction->segbases[i] + transaction->offset[i][j], sizeof(char), transaction->length[i][j], log);
-            }
-        }
-        fwrite("TEnd", 1, 2, log);
+        int size = steque_size(&transaction->log);
+        fwrite("TB", 1, 2, log);
+        fwrite(&size, sizeof(int), 1, log);
+        commitTransaction(transaction, 0, size, log);
+        fwrite("TE", 1, 2, log);
+        fflush(log);
         freeTransaction(transaction);
     }
 }
 
-/*
-   undo all changes that have happened within the specified transaction.
-   */
+/* undo all changes that have happened within the specified transaction. */
 void rvm_abort_trans(trans_t tid){
     RVM_transaction *transaction = getTransaction(tid);
     if(transaction != NULL){
-        for(int i=0; i<transaction->numsegs; i++){
-            for(int j=transaction->offset[i].size()-1; j>=0; j--){
-                printf("\tundo\t[%s]\toffset: %d, size: %d\n", getSegname(transaction->segbases[i]), transaction->offset[i][j], transaction->length[i][j]);
-                memcpy((char*) transaction->segbases[i]+transaction->offset[i][j], transaction->undo[i][j], transaction->length[i][j]);
-            }
+        int size = steque_size(&transaction->log);
+        for(int i=0; i<size; i++){
+            // Revert back and free malloc memory
+            log_t *log = (log_t*) steque_pop (&transaction->log);
+            void *segbase = transaction->segbases[log->segID];
+            int offset = log->offset;
+            int length = log->length;
+            memcpy((char*) segbase + offset, log->mem, length);
+            printf("\tundo\t[%s]\toffset: %d, size: %d\n", getSegname(segbase), offset, length);
+
+            free(log->mem);
+            free(log);
         }
         freeTransaction(transaction);
     }
@@ -244,13 +243,35 @@ void rvm_abort_trans(trans_t tid){
 void rvm_truncate_log(rvm_t rvm){
     unsigned long int id;
     for (id = rvm->log_id_min; id < rvm->log_id; id++) {
-        printf("truncate %lu\n", id);
+        printf("truncate .log%lu\n", id);
         truncateLog(rvm, id);
     }
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/* Utility functions */
+void rvm_destructor(rvm_t rvm){
+    //abort remaining transaction
+    int size = steque_size(&rvm->transaction);
+    for(int i=0; i<size; i++){
+        RVM_transaction *transaction = (RVM_transaction*) steque_front (&rvm->transaction);
+        rvm_commit_trans(transaction->id);
+    }
+
+    //unmap remaining segbase, segname
+    while(!seqsrchst_isempty(&rvm->segnameMap)){
+        void *segbase = rvm->segnameMap.first->key;
+        removeMapping(segbase);
+    }
+
+    //free additional memory
+    free(rvm->directory);
+    fclose(rvm->log_file);
+    free(rvm);
+}
+
+
 
 int checkTransaction(rvm_t rvm, char *cur, char *end) {
     if (cur >= end) return -1;
@@ -288,8 +309,11 @@ char* redoTransaction(rvm_t rvm, char *cur, char *end) {
             printf("mmap %s\n", segname);
             sprintf(seg_path, "%s/%s", rvm->directory, segname);
             fd = open(seg_path, O_RDWR);
-            if (fd == -1) return NULL;
-            if (fstat(fd, &sb) == -1) return NULL;
+            if(fd == -1 || fstat(fd, &sb) == -1){
+                perror("ERROR:");
+                fprintf(stderr, "truncate %s failed\n", seg_path);
+                return NULL;
+            }
             segbase = (char*)mmap(NULL, sb.st_size, PROT_WRITE, MAP_SHARED, fd, 0);
             previousSegname = segname;
         }
@@ -315,15 +339,17 @@ void truncateLog(rvm_t rvm, unsigned long int id) {
     char *addr;
     char *cur;
     char *end;
-    
+
     sprintf(log_path, "%s/.log%lu", rvm->directory, id);
     fd = open(log_path, O_RDONLY);
-    if (fd == -1) return;
-    if (fstat(fd, &sb) == -1) return;
-    addr = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    cur = addr;
+    if (fd == -1 || fstat(fd, &sb) == -1){
+        perror("ERROR:");
+        fprintf(stderr, "truncate %s failed\n", log_path);
+        return;
+    }
+
+    cur = addr = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     end = addr + sb.st_size;
-    printf("log size = %d\n", (int)sb.st_size);
     while(cur) {
         cur = redoTransaction(rvm, cur, end);
     }
@@ -335,45 +361,78 @@ void truncateLog(rvm_t rvm, unsigned long int id) {
 void freeTransaction(RVM_transaction* transaction){
     if(transaction == NULL) return;
 
-    for(int i=0; i<transaction->numsegs; i++){
-        for(int j=0; j<transaction->undo[i].size(); j++){
-            free(transaction->undo[i][j]);
-        }
+    // Free remaining log record
+    int size = steque_size(&transaction->log);
+    for(int i=0; i<size; i++){
+        log_t *record = (log_t*) steque_pop (&transaction->log);
+        free(record->mem);
+        free(record);
     }
 
-
-    for(std::vector<RVM_transaction*>::iterator it = rvm->transaction.begin(); it != rvm->transaction.end(); it++){
-        if((*it)->id == transaction->id){
-            rvm->transaction.erase(it);
+    // Remove transaction from rvm->transcation list
+    size = steque_size(&rvm->transaction);
+    for(int i=0; i<size; i++){
+        RVM_transaction *first = (RVM_transaction*) steque_pop (&rvm->transaction);
+        if(first->id == transaction->id)
             break;
-        }
+        else
+            steque_push(&rvm->transaction, first);
     }
 
+    free(transaction);
     printf("trans[%d] finished\n", transaction->id);
+}
 
+void commitTransaction(RVM_transaction *transaction, const int cur, const int max, FILE* log){
+    if(transaction == NULL) return;
+    if(cur >= max || cur < 0) return;
 
+    log_t *record = (log_t*) steque_pop (&transaction->log);
+    if(record == NULL) return;
+    commitTransaction(transaction, cur+1, max, log);
+    
+    void *mem = transaction->segbases[record->segID];
+    int offset = record->offset;
+    int length = record->length;
+
+    const char* segname = getSegname(mem);
+    printf("\tcommit\t[%s]\toffset: %d, size: %d\n", segname, offset, length);
+    fwrite(segname, sizeof(char), strlen(segname) + 1, log);
+    fwrite(&offset, sizeof(int), 1, log);
+    fwrite(&length, sizeof(int), 1, log);
+    fwrite((char*) mem + offset, sizeof(char), length, log);
+    
+    free(record->mem);
+    free(record);
 }
 
 RVM_transaction *getTransaction(trans_t tid){
     RVM_transaction *transaction = NULL;
-    for(std::vector<RVM_transaction*>::iterator it = rvm->transaction.begin(); it != rvm->transaction.end(); it++){
-        if((*it)->id == tid){
-            transaction = *it;
+
+    int size = steque_size(&rvm->transaction);
+    for(int i=0; i<size; i++){
+        transaction = (RVM_transaction*) steque_pop(&rvm->transaction);
+        steque_push(&rvm->transaction, transaction);
+        if(transaction->id == transaction->id)
             break;
-        }
     }
     return transaction;
 }
 
-const char *getSegname(void *segbase){
-    int index = -1;
-    for(unsigned int i=0; i<rvm->segmem.size(); i++){
-        if(rvm->segmem[i] == segbase) {
-            index = i;
-            break;
-        }
-    }
+const void *getSegbase(const char *segname){
+    return (char*) seqsrchst_get(&rvm->segbaseMap, (void*)segname);
+}
 
-    if(index == -1) return NULL;
-    else return rvm->segname[index];
+const char *getSegname(void *segbase){
+    return (char*) seqsrchst_get(&rvm->segnameMap, segbase);
+}
+
+void removeMapping(void *segbase){
+    char *segname = (char*) getSegname(segbase);
+    if(segname == NULL) return;
+
+    seqsrchst_delete(&rvm->segnameMap, segbase);
+    seqsrchst_delete(&rvm->segbaseMap, segname);
+    free(segbase);
+    free(segname);
 }

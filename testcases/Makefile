@@ -1,4 +1,4 @@
-CFLAGS  = -Wall -g -I.
+CFLAGS  = -Wall -g
 LFLAGS  =
 CC      = g++
 RM      = /bin/rm -rf
