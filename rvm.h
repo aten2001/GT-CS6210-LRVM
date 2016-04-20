@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 
+#define __FILE_PREPEND "__RVM_"
 #define trans_t int
 #define rvm_t RecoverableVM*
 

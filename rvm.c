@@ -98,7 +98,7 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
 
     // Open file and truncate to size_to_create
     char file_name[strlen(rvm->directory) + strlen(segname) + 1];
-    sprintf(file_name, "%s/%s", rvm->directory, segname);
+    sprintf(file_name, "%s/%s%s", rvm->directory, __FILE_PREPEND, segname);
 
     int fd = open(file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
     struct stat sb;
@@ -262,7 +262,7 @@ void rvm_destructor(rvm_t rvm){
     //unmap remaining segbase, segname
     while(!seqsrchst_isempty(&rvm->segnameMap)){
         void *segbase = rvm->segnameMap.first->key;
-        removeMapping(segbase);
+        rvm_unmap(rvm, segbase);
     }
 
     //free additional memory
@@ -307,7 +307,7 @@ char* redoTransaction(rvm_t rvm, char *cur, char *end) {
                 close(fd);
             }
             printf("mmap %s\n", segname);
-            sprintf(seg_path, "%s/%s", rvm->directory, segname);
+            sprintf(seg_path, "%s/%s%s", rvm->directory, __FILE_PREPEND, segname);
             fd = open(seg_path, O_RDWR);
             if(fd == -1 || fstat(fd, &sb) == -1){
                 perror("ERROR:");
