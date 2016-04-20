@@ -7,25 +7,31 @@
 
 #include <stdio.h>
 
-#define __FILE_PREPEND "__RVM_"
-#define trans_t int
-#define rvm_t RecoverableVM*
+//#define __UDACITY__
 
-struct log_t{
+#define __FILE_PREPEND "__RVM_"
+
+#ifdef __UDACITY__
+#include "udacity.h"
+#else
+typedef int trans_t;
+#endif
+
+typedef struct{
     int segID;
     int offset;
     int length;
     void *mem;
-};
+} log_t;
 
-struct RVM_transaction{
+typedef struct {
     trans_t id;
     int numsegs;
     void **segbases;
     steque_t log;
-};
+} RVM_transaction;
 
-struct RecoverableVM{
+typedef struct{
     char *directory; //directory name
 
     trans_t transID; // last transaction ID
@@ -36,7 +42,12 @@ struct RecoverableVM{
     unsigned long int log_id;
     unsigned long int log_id_min;
     FILE *log_file;
-};
+} RecoverableVM;
+
+#ifndef __UDACITY__
+typedef RecoverableVM* rvm_t;
+#endif
+
 
 /* Formal API */
 rvm_t rvm_init(const char *directory);
