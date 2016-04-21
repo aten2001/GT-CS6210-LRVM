@@ -270,11 +270,13 @@ void rvm_truncate_log(rvm_t rvm)
 #endif
 {
     unsigned long int id;
+    printf("try to transcate...\n");
     for (id = rvm->log_id_min; id < rvm->log_id; id++) {
         printf("truncate .log%lu\n", id);
         truncateLog(rvm, id);
     }
     rvm->log_id_min = rvm->log_id;
+    printf("done\n");
 }
 
 
@@ -313,7 +315,65 @@ int checkTransaction(rvm_t rvm_, char *cur, char *end)
 int checkTransaction(rvm_t rvm, char *cur, char *end)
 #endif
 {
-    if (cur >= end) return -1;
+    //EOF
+    if (cur > end) return -1;
+
+    //TB
+    if (cur + 1 > end || *cur != 'T' || *(cur + 1) != 'B') {
+        fprintf(stderr, "checkTransaction error: TB\n");
+        return -1;
+    }
+    cur += 2;
+
+    //numlog
+    if (cur + sizeof(int) - 1 > end) {
+        fprintf(stderr, "checkTransaction error: numlog\n");
+        return -1;
+    }
+    int numlog = *((int*)cur);
+    cur += sizeof(int);
+
+    int nameLen;
+    int length;
+    while(numlog) {
+        //segname
+        nameLen = 0;
+        while(cur <= end && *cur != '\0') {
+            nameLen++;
+            cur++;
+        }
+        if(cur > end || !nameLen) {
+            printf("%d\n", nameLen);
+            fprintf(stderr, "checkTransaction error: segname\n");
+            return -1;
+        }
+        cur++;
+
+        //offset & length
+        if (cur + sizeof(int)*2 - 1 > end) {
+            fprintf(stderr, "checkTransaction error: offset or length\n");
+            return -1;
+        }
+        cur += sizeof(int); //offset
+        length = *((int*)cur);
+        cur += sizeof(int);
+
+        //data
+        cur += length;
+        if(cur > end) {
+            fprintf(stderr, "checkTransaction error: data\n");
+            return -1;
+        }
+
+        numlog--;
+    }
+
+    //TE
+    if (cur + 1 > end || *cur != 'T' || *(cur + 1) != 'E') {
+        fprintf(stderr, "checkTransaction error: TE\n");
+        return -1;
+    }
+
     return 0;
 }
 
@@ -398,7 +458,7 @@ void truncateLog(rvm_t rvm, unsigned long int id)
     }
 
     cur = addr = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    end = addr + sb.st_size;
+    end = addr + sb.st_size - 1;
     while(cur) {
         cur = redoTransaction(rvm, cur, end);
     }
@@ -429,8 +489,8 @@ void freeTransaction(RVM_transaction* transaction){
             steque_push(&rvm->transaction, first);
     }
 
-    free(transaction);
     printf("trans[%d] finished\n", transaction->id);
+    free(transaction);
 }
 
 void commitTransaction(RVM_transaction *transaction, const int cur, const int max, FILE* log){
