@@ -38,6 +38,7 @@ typedef struct{
     steque_t transaction; // transaction stack
     seqsrchst_t segnameMap; // (key, value) = (segbase, segname) map
     seqsrchst_t segbaseMap; // (key, value) = (segname, segbase) map
+    seqsrchst_t dirtyMap;
     
     unsigned long int log_id;
     unsigned long int log_id_min;
@@ -73,4 +74,9 @@ void truncateLog(rvm_t rvm, unsigned long int id);
 const void *getSegbase(const char* segname);
 const char *getSegname(void* segbase);
 void removeMapping(void* segbase);
+
+int isDirty(rvm_t rvm, const char *segname);
+void setDirty(rvm_t rvm, const char *segname, int dirty);
+void clearAllDirty(rvm_t rvm);
+void resetLog(rvm_t rvm_);
 #endif

@@ -66,23 +66,14 @@ rvm_t rvm_init(const char *directory){
     }
     closedir(dir);
 
-    rvm_truncate_log((rvm_t)rvm);
-    rvm->log_id = 0;
-
-    // Update logID
-    logID_file = fopen(logId_path, "w");
-    fprintf(logID_file, "%lu", rvm->log_id + 1);
-    fclose(logID_file);
-
-    // Create Log file
-    char log_path[strlen(directory) + 20];
-    sprintf(log_path, "%s/.log%lu", directory, rvm->log_id);
-    rvm->log_file = fopen(log_path, "wb+");
+    rvm_truncate_log(rvm);
+    resetLog(rvm);
 
     // Initial Internal data structure
     rvm->transID = 0;
     seqsrchst_init(&rvm->segnameMap, baseCMP);
     seqsrchst_init(&rvm->segbaseMap, nameCMP);
+    seqsrchst_init(&rvm->dirtyMap, nameCMP);
     return (rvm_t)rvm;
 }
 
@@ -99,6 +90,16 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create)
     if(getSegbase(segname) != NULL){
         fprintf(stderr, "map %s with size %d failed\n", segname, size_to_create);
         return (void*) -1;
+    }
+
+    if(isDirty(rvm, segname)) {
+        if(rvm->log_file) {
+            fclose(rvm->log_file);
+            rvm->log_id++;
+        }
+        rvm_truncate_log(rvm);
+        resetLog(rvm);
+        clearAllDirty(rvm);
     }
 
     // Open file and truncate to size_to_create
@@ -157,7 +158,7 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 
     // delete disk hard-copy
     char filename[strlen(rvm->directory) + strlen(segname) + 1];
-    sprintf(filename, "%s/%s", rvm->directory, segname);
+    sprintf(filename, "%s/%s%s", rvm->directory, __FILE_PREPEND, segname);
     unlink(filename);
 }
 
@@ -273,6 +274,7 @@ void rvm_truncate_log(rvm_t rvm)
         printf("truncate .log%lu\n", id);
         truncateLog(rvm, id);
     }
+    rvm->log_id_min = rvm->log_id;
 }
 
 
@@ -452,6 +454,7 @@ void commitTransaction(RVM_transaction *transaction, const int cur, const int ma
     
     free(record->mem);
     free(record);
+    setDirty(rvm, segname, 1);
 }
 
 RVM_transaction *getTransaction(trans_t tid){
@@ -485,3 +488,74 @@ void removeMapping(void *segbase){
     free(segbase);
     free(segname);
 }
+
+#ifdef __UDACITY__
+int isDirty(rvm_t rvm_, const char *segname)
+#else
+int isDirty(rvm_t rvm, const char *segname)
+#endif
+{
+    return seqsrchst_contains(&rvm->dirtyMap, (char*)segname);
+}
+
+#ifdef __UDACITY__
+void setDirty(rvm_t rvm_, const char *segname, int dirty)
+#else
+void setDirty(rvm_t rvm, const char *segname, int dirty)
+#endif
+{
+
+    if(!dirty) {
+        seqsrchst_delete(&rvm->dirtyMap, (char*)segname);
+    }
+    else if(!seqsrchst_contains(&rvm->dirtyMap, (char*)segname)) {
+        char *key = (char*)malloc(strlen(segname) + 1);
+        strcpy(key, segname);
+        seqsrchst_put(&rvm->dirtyMap, key, (void*)1);
+    }
+}
+
+void seqsrchst_destroy_key(seqsrchst_t *st){
+  seqsrchst_node* node;
+  seqsrchst_node* prev;
+  
+  node = st->first;
+  while(node != NULL){
+    free(node->key);
+    prev = node;
+    node = node->next;
+    free(prev);
+  }  
+}
+
+#ifdef __UDACITY__
+void clearAllDirty(rvm_t rvm_)
+#else
+void clearAllDirty(rvm_t rvm)
+#endif
+{
+    seqsrchst_destroy_key(&rvm->dirtyMap);
+    seqsrchst_init(&rvm->dirtyMap, nameCMP);
+}
+
+#ifdef __UDACITY__
+void resetLog(rvm_t rvm_)
+#else
+void resetLog(rvm_t rvm)
+#endif
+{
+    rvm->log_id_min = rvm->log_id = 0;
+
+    // Update logID
+    char logId_path[strlen(rvm->directory) + 20];
+    sprintf(logId_path, "%s/.rvm_logID", rvm->directory);
+    FILE *logID_file = fopen(logId_path, "w");
+    fprintf(logID_file, "%lu", rvm->log_id + 1);
+    fclose(logID_file);
+
+    // Create Log file
+    char log_path[strlen(rvm->directory) + 20];
+    sprintf(log_path, "%s/.log%lu", rvm->directory, rvm->log_id);
+    rvm->log_file = fopen(log_path, "wb+");
+}
+
