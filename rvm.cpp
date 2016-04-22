@@ -364,14 +364,17 @@ void truncateLog(rvm_t rvm, unsigned long int id){
 }
 
 bool isDirty(rvm_t rvm, std::string segname){
-    return rvm->dirtyMap[segname];
+    std::map<std::string, bool>::iterator it = rvm->dirtyMap.find(segname);
+
+    if(it == rvm->dirtyMap.end()) return false;
+    else return true;
 }
 
 void setDirty(rvm_t rvm, std::string segname, bool dirty){
     if(!dirty) 
         rvm->dirtyMap.erase(segname);
-
-    rvm->dirtyMap[segname] = dirty;
+    else
+        rvm->dirtyMap[segname] = dirty;
 }
 
 void resetLog(rvm_t rvm){
