@@ -4,6 +4,7 @@ Log File Format
 |TB|# of Records|Segname1|offset1|length1|mem1|Segname2|offset2|...|TE|
 |TB|# of Records|Segname1|offset1|length1|mem1|TE|
 
-
-The log file is get cleaned up every rvm_init.
-In addition, once we detected a segnam is dirty, it has been modified since the program run, when rvm_map. We would do rvm_truncate to provide the up-to-date memory.
+We truncate the redo log during several circumstances.
+1. During rvm_map. Once we detected that segname unmapped and modified by previous transaction, we call rvm_truncate_log to update segment.
+2. During rvm_commit. Once we detected that the log file is too big (>1M), we call rvm_truncate_log to clean up the log file.
+3. During rvm_init. We do a rvm_truncate_log when we initialize the rvm.

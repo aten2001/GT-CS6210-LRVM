@@ -21,7 +21,7 @@ void proc1()
     for(i=0; i<100000; i++){
         trans = rvm_begin_trans(rvm, 1, (void**) segs);
         rvm_about_to_modify(trans, segs[0], i, 1);
-        sprintf(segs[0], "%c", i%200+30);
+        segs[0][i] = i%100;
         rvm_commit_trans(trans);
     }
     abort();
@@ -36,9 +36,9 @@ void proc2()
     rvm_t rvm;
     rvm = rvm_init("rvm_segments");
     segs[0] = (char *) rvm_map(rvm, "testseg", 100000);
-    for(i=0; i<100000; i++){
-        if(segs[0][i] != i%200+30) {
-            printf("ERROR: mem[%d]: %d != %d\n", i, segs[0][i], i%200+30);
+    for(i=0; i<100000; i++) {
+        if(segs[0][i] != i%100) {
+            printf("ERROR: mem[%d]: %d != %d\n", i, segs[0][i], i%100);
             exit(2);
         }
     }
