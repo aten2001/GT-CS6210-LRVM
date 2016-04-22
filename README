@@ -1,0 +1,9 @@
+Log files are used to records the modification of the memory segments instead of directly modifying the memory.
+
+Log File Format
+|TB|# of Records|Segname1|offset1|length1|mem1|Segname2|offset2|...|TE|
+|TB|# of Records|Segname1|offset1|length1|mem1|TE|
+
+
+The log file is get cleaned up every rvm_init.
+In addition, once we detected a segnam is dirty, it has been modified since the program run, when rvm_map. We would do rvm_truncate to provide the up-to-date memory.

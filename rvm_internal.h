@@ -68,7 +68,13 @@ private:
     std::map<void*, std::string> segnameMap; // (key, value) = (segbase, segname) map
     std::map<std::string, void*> segbaseMap; // (key, value) = (segname, segbase) map
 };
-
 typedef RecoverableVM* rvm_t;
 
+
+////////////////////////////////////////////////////////////////////
+/* Utility function */
+void truncateLog(rvm_t rvm, unsigned long int id);
+bool isDirty(rvm_t rvm, std::string segname);
+void setDirty(rvm_t rvm, std::string segname, bool dirty);
+void resetLog(rvm_t rvm_);
 #endif

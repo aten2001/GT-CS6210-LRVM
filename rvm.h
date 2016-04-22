@@ -14,10 +14,4 @@ void rvm_commit_trans(trans_t tid);
 void rvm_abort_trans(trans_t tid);
 void rvm_truncate_log(rvm_t rvm);
 
-////////////////////////////////////////////////////////////////////
-/* Utility function */
-void truncateLog(rvm_t rvm, unsigned long int id);
-bool isDirty(rvm_t rvm, std::string segname);
-void setDirty(rvm_t rvm, std::string segname, bool dirty);
-void resetLog(rvm_t rvm_);
 #endif
