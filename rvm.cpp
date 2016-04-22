@@ -22,8 +22,7 @@ rvm_t rvm_init(const char *directory){
         return NULL;
     }
 
-    rvm = new RecoverableVM();
-    rvm->directory = std::string(directory);
+    rvm = new RecoverableVM(directory);
 
     // Create Directory
     struct stat st;
@@ -72,16 +71,15 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
         return (void*) -1;
     }
 
-    printf("********rvm_map[%s]\tDirty: %d********\n", segname, isDirty(rvm, segname));
-    if(isDirty(rvm, segname)) {
+    printf("********rvm_map[%s]\tDirty: %d********\n", segname, rvm->isDirty(segname));
+    if(rvm->isDirty(segname)) {
         if(rvm->log_file) {
             fclose(rvm->log_file);
             rvm->log_id++;
         }
         rvm_truncate_log(rvm);
         resetLog(rvm);
-
-        rvm->dirtyMap.erase(rvm->dirtyMap.begin(), rvm->dirtyMap.end());
+        rvm->clearDirty();
     }
 
     // Open file and truncate to size_to_create
@@ -130,15 +128,14 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
     // If any segbases is modified by other transaction, return immediately
     for(int i=0; i<numsegs; i++){
         for(unsigned int j=0; j<rvm->transaction.size(); j++){
-            RVM_transaction* transaction = rvm->transaction[j];
-            if(transaction->find(segbases[i]) >= 0){
+            if(rvm->transaction[j]->find(segbases[i]) >= 0){
                 fprintf(stderr, "begin trans %p failed\n", segbases[i]);
                 return (trans_t) -1;
             }
         }
     }
 
-    RVM_transaction *transaction = new RVM_transaction(numsegs, segbases);
+    RVM_transaction *transaction = new RVM_transaction(rvm, numsegs, segbases);
     rvm->transaction.push_back(transaction);
     printf("trans[%d] begin\n", transaction->getID());
     return transaction->getID();
@@ -176,13 +173,32 @@ void rvm_commit_trans(trans_t tid){
             fwrite((char*) mem + offset, sizeof(char), length, rvm->log_file);
 
             delete record;
-            setDirty(rvm, segname, true);
+            rvm->setDirty(segname, true);
+        
         }
         fwrite("TE", 1, 2, rvm->log_file);
         fflush(rvm->log_file);
-        
+
         transaction->log.erase(transaction->log.begin(), transaction->log.end());
         delete transaction;
+
+
+        struct stat sb;
+        if(fstat(fileno(rvm->log_file), &sb) != 0){
+            perror("ERROR");
+            return;
+        } 
+        printf("log size %lu, limit: %d\n", sb.st_size, __MAX_LOG_SIZE);
+        if(sb.st_size > __MAX_LOG_SIZE){
+            printf("log size %lu exceed limit: %d, truncating...\n", sb.st_size, __MAX_LOG_SIZE);
+            if(rvm->log_file) {
+                fclose(rvm->log_file);
+                rvm->log_id++;
+            }
+            rvm_truncate_log(rvm);
+            resetLog(rvm);
+            rvm->clearDirty();
+        }
     }
 }
 
@@ -216,7 +232,6 @@ void rvm_truncate_log(rvm_t rvm){
     rvm->log_id_min = rvm->log_id;
     printf("done\n");
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* Utility functions */
@@ -282,7 +297,6 @@ int checkTransaction(rvm_t rvm, char *cur, char *end){
 
     return 0;
 }
-
 char* redoTransaction(rvm_t rvm, char *cur, char *end){
     char seg_path[strlen(rvm->directory.c_str()) + 20];
     int fd = -1;
@@ -336,7 +350,6 @@ char* redoTransaction(rvm_t rvm, char *cur, char *end){
     cur += 2;
     return cur;    
 }
-
 void truncateLog(rvm_t rvm, unsigned long int id){
     char log_path[strlen(rvm->directory.c_str()) + 20];
     int fd;
@@ -362,21 +375,6 @@ void truncateLog(rvm_t rvm, unsigned long int id){
     close(fd);
     unlink(log_path);
 }
-
-bool isDirty(rvm_t rvm, std::string segname){
-    std::map<std::string, bool>::iterator it = rvm->dirtyMap.find(segname);
-
-    if(it == rvm->dirtyMap.end()) return false;
-    else return true;
-}
-
-void setDirty(rvm_t rvm, std::string segname, bool dirty){
-    if(!dirty) 
-        rvm->dirtyMap.erase(segname);
-    else
-        rvm->dirtyMap[segname] = dirty;
-}
-
 void resetLog(rvm_t rvm){
     rvm->log_id_min = rvm->log_id = 0;
 
@@ -392,18 +390,19 @@ void resetLog(rvm_t rvm){
     rvm->log_file = fopen(log_path, "wb+");
 }
 
+// Destructor
 RecoverableVM::~RecoverableVM(){
     //abort remaining transaction
-    for(unsigned int i=0; i<rvm->transaction.size(); i++){
-        rvm_commit_trans(rvm->transaction[0]->getID());
+    for(unsigned int i=0; i<transaction.size(); i++){
+        rvm_abort_trans(transaction[0]->getID());
     }
 
     //unmap remaining segbase, segname
-    while(!rvm->segnameMap.empty()){
-        rvm_unmap(rvm, (void*)rvm->segnameMap.begin()->first);
+    while(!segnameMap.empty()){
+        rvm_unmap(this, (void*)segnameMap.begin()->first);
     }
 
-    fclose(rvm->log_file);
+    fclose(log_file);
 }
 RVM_transaction::~RVM_transaction(){
     // Free remaining log record
@@ -427,16 +426,17 @@ log_t::~log_t(){
     free(mem);
 }
 
+// RecoverableVM method
 const void *RecoverableVM::getBase(std::string segname){
-    std::map<std::string, void*>::iterator it = rvm->segbaseMap.find(segname);
+    std::map<std::string, void*>::iterator it = segbaseMap.find(segname);
 
-    if(it == rvm->segbaseMap.end()) return NULL;
+    if(it == segbaseMap.end()) return NULL;
     else return it->second;
 }
 const char *RecoverableVM::getName(void *segbase){
-    std::map<void*, std::string>::iterator it = rvm->segnameMap.find(segbase);
+    std::map<void*, std::string>::iterator it = segnameMap.find(segbase);
 
-    if(it == rvm->segnameMap.end()) return NULL;
+    if(it == segnameMap.end()) return NULL;
     else return it->second.c_str();
 }
 RVM_transaction* RecoverableVM::getTransaction(trans_t tid){
@@ -458,7 +458,20 @@ bool RecoverableVM::eraseMap(void* mem){
     segbaseMap.erase(segname);
     return true;
 }
+bool RecoverableVM::isDirty(std::string segname){
+    std::map<std::string, bool>::iterator it = dirtyMap.find(segname);
 
+    if(it == dirtyMap.end()) return false;
+    else return it->second;
+}
+void RecoverableVM::setDirty(std::string segname, bool dirty){
+    if(!dirty) 
+        dirtyMap.erase(segname);
+    else
+        dirtyMap[segname] = dirty;
+}
+
+// RVM_transaction method
 int RVM_transaction::find(void* mem){
     for(int k=0; k<numsegs; k++)
         if(mem == segbases[k]) return k;
