@@ -9,14 +9,12 @@ RANLIB  = ranlib
 
 LIBRARY = librvm.a
 
-LIB_SRC = rvm.c steque.c seqsrchst.c
-
-LIB_OBJ = $(patsubst %.c,%.o,$(LIB_SRC))
-
+LIB_SRC = rvm.cpp
+LIB_OBJ = $(patsubst %.cpp,%.o,$(LIB_SRC))
 
 all: $(LIBRARY) test
 
-%.o: %.c
+%.o: %.cpp
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(LIBRARY): $(LIB_OBJ)

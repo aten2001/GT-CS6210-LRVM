@@ -15,79 +15,77 @@
  * modifying regions of the segment */
 void create() 
 {
-     
-  // rvm_t rvm = rvm_init(__FILE__ ".d");
-  rvm_t rvm = rvm_init("rvm_segments");
-     rvm_destroy(rvm, "testseg");
-     char* segs[1];
-     segs[0] = (char *) rvm_map(rvm, "testseg", 6);
-     
-     trans_t tid;
+    rvm_t rvm = rvm_init("rvm_segments");
+    rvm_destroy(rvm, "testseg");
+    char* segs[1];
+    segs[0] = (char *) rvm_map(rvm, "testseg", 6);
 
-     /* zero out */
-     tid = rvm_begin_trans(rvm, 1, (void **) segs);
-     rvm_about_to_modify(tid, segs[0], 0, 5);
-     sprintf(segs[0], "    ");
-     assert(strcmp("    ", segs[0]) == 0);
-     rvm_commit_trans(tid);
-     rvm_unmap(rvm, segs[0]);
+    trans_t tid;
 
-     segs[0] = (char *) rvm_map(rvm, "testseg", 10);
-     tid = rvm_begin_trans(rvm, 1, (void **) segs);
-     rvm_about_to_modify(tid, segs[0], 0, 1);
-     segs[0][0] = 'a';
-     assert(strcmp("a   ", segs[0]) == 0);
-     rvm_about_to_modify(tid, segs[0], 3, 1);
-     segs[0][3] = 'z';
-     assert(strcmp("a  z", segs[0]) == 0);
-     rvm_commit_trans(tid);
+    /* zero out */
+    tid = rvm_begin_trans(rvm, 1, (void **) segs);
+    rvm_about_to_modify(tid, segs[0], 0, 5);
+    sprintf(segs[0], "    ");
+    assert(strcmp("    ", segs[0]) == 0);
+    rvm_commit_trans(tid);
+    rvm_unmap(rvm, segs[0]);
 
-     /* abort an attempt to overwrite */
-     tid = rvm_begin_trans(rvm, 1, (void **) segs);
-     rvm_about_to_modify(tid, segs[0], 0, 5);
-     sprintf(segs[0], "bbb ");
-     assert(strcmp("bbb ", segs[0]) == 0);
-     rvm_abort_trans(tid);
-     assert(strcmp("a  z", segs[0]) == 0);
-     rvm_unmap(rvm, segs[0]);
+    segs[0] = (char *) rvm_map(rvm, "testseg", 10);
+    tid = rvm_begin_trans(rvm, 1, (void **) segs);
+    rvm_about_to_modify(tid, segs[0], 0, 1);
+    segs[0][0] = 'a';
+    assert(strcmp("a   ", segs[0]) == 0);
+    rvm_about_to_modify(tid, segs[0], 3, 1);
+    segs[0][3] = 'z';
+    assert(strcmp("a  z", segs[0]) == 0);
+    rvm_commit_trans(tid);
 
-     abort();
+    /* abort an attempt to overwrite */
+    tid = rvm_begin_trans(rvm, 1, (void **) segs);
+    rvm_about_to_modify(tid, segs[0], 0, 5);
+    sprintf(segs[0], "bbb ");
+    assert(strcmp("bbb ", segs[0]) == 0);
+    rvm_abort_trans(tid);
+    assert(strcmp("a  z", segs[0]) == 0);
+    rvm_unmap(rvm, segs[0]);
+
+    abort();
 }
 
 
 /* test the resulting segment */
 void test() 
 {
-     char* segs[1];
-     rvm_t rvm;
+    char* segs[1];
+    rvm_t rvm;
 
-     rvm = rvm_init("rvm_segments");
+    rvm = rvm_init("rvm_segments");
 
-     segs[0] = (char *) rvm_map(rvm, "testseg", 10000);
-     assert(strcmp("a  z", segs[0]) == 0);
+    segs[0] = (char *) rvm_map(rvm, "testseg", 10000);
+    assert(strcmp("a  z", segs[0]) == 0);
 
-     printf("OK\n");
-     exit(0);
+    printf("OK\n");
+    exit(0);
 }
 
 
 int main(int argc, char **argv)
 {
-     int pid;
+    int pid;
 
-     pid = fork();
-     if(pid < 0) {
-	  perror("fork");
-	  exit(2);
-     }
-     if(pid == 0) {
-	  create();
-	  exit(0);
-     }
+    pid = fork();
+    if(pid < 0) {
+        perror("fork");
+        exit(2);
+    }
+    if(pid == 0) {
+        create();
+        exit(0);
+    }
 
-     waitpid(pid, NULL, 0);
+    waitpid(pid, NULL, 0);
 
-     test();
+    test();
 
-     return 0;
+    return 0;
 }
