@@ -7,15 +7,9 @@
 
 #include <stdio.h>
 
-//#define __UDACITY__
-
 #define __FILE_PREPEND "__RVM_"
 
-#ifdef __UDACITY__
-#include "udacity.h"
-#else
 typedef int trans_t;
-#endif
 
 typedef struct{
     int segID;
@@ -45,9 +39,7 @@ typedef struct{
     FILE *log_file;
 } RecoverableVM;
 
-#ifndef __UDACITY__
 typedef RecoverableVM* rvm_t;
-#endif
 
 
 /* Formal API */

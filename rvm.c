@@ -80,11 +80,7 @@ rvm_t rvm_init(const char *directory){
 /*
    map a segment from disk into memory. If the segment does not already exist, then create it and give it size size_to_create. If the segment exists but is shorter than size_to_create, then extend it until it is long enough. It is an error to try to map the same segment twice.
    */
-#ifdef __UDACITY__
-void *rvm_map(rvm_t rvm_, const char *segname, int size_to_create)
-#else
 void *rvm_map(rvm_t rvm, const char *segname, int size_to_create)
-#endif
 {
     // If segname is already mapped, return immediate
     if(getSegbase(segname) != NULL){
@@ -127,11 +123,7 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 }
 
 /* unmap a segment from memory. */
-#ifdef __UDACITY__
-void rvm_unmap(rvm_t rvm_, void *segbase)
-#else
 void rvm_unmap(rvm_t rvm, void *segbase)
-#endif
 {
     // if segbase is not currently mapped, return immediately.
     if(getSegname(segbase) == NULL){
@@ -144,11 +136,7 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 }
 
 /* destroy a segment completely, erasing its backing store. This function should not be called on a segment that is currently mapped. */
-#ifdef __UDACITY__
-void rvm_destroy(rvm_t rvm_, const char *segname)
-#else
 void rvm_destroy(rvm_t rvm, const char *segname)
-#endif
 {
     // if segname is current mapped, return immediately
     if(getSegbase(segname) != NULL){
@@ -165,11 +153,7 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 /*
    begin a transaction that will modify the segments listed in segbases. If any of the specified segments is already being modified by a transaction, then the call should fail and return (trans_t) -1. Note that trans_t needs to be able to be typecasted to an integer type.
    */
-#ifdef __UDACITY__
-trans_t rvm_begin_trans(rvm_t rvm_, int numsegs, void **segbases)
-#else
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases)
-#endif
 {
     // If any segbases is modified by other transaction, return immediately
     int i, j, k;
@@ -263,11 +247,7 @@ void rvm_abort_trans(trans_t tid){
 /*
    play through any committed or aborted items in the log file(s) and shrink the log file(s) as much as possible.
    */
-#ifdef __UDACITY__
-void rvm_truncate_log(rvm_t rvm_)
-#else
 void rvm_truncate_log(rvm_t rvm)
-#endif
 {
     unsigned long int id;
     printf("try to transcate...\n");
@@ -282,11 +262,7 @@ void rvm_truncate_log(rvm_t rvm)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* Utility functions */
-#ifdef __UDACITY__
-void rvm_destructor(rvm_t rvm_)
-#else
 void rvm_destructor(rvm_t rvm)
-#endif
 {
     //abort remaining transaction
     int size = steque_size(&rvm->transaction);
@@ -309,11 +285,7 @@ void rvm_destructor(rvm_t rvm)
 }
 
 
-#ifdef __UDACITY__
-int checkTransaction(rvm_t rvm_, char *cur, char *end)
-#else
 int checkTransaction(rvm_t rvm, char *cur, char *end)
-#endif
 {
     //EOF
     if (cur > end) return -1;
@@ -377,11 +349,7 @@ int checkTransaction(rvm_t rvm, char *cur, char *end)
     return 0;
 }
 
-#ifdef __UDACITY__
-char* redoTransaction(rvm_t rvm_, char *cur, char *end)
-#else
 char* redoTransaction(rvm_t rvm, char *cur, char *end)
-#endif
 {
     char seg_path[strlen(rvm->directory) + 20];
     int fd = -1;
@@ -436,11 +404,7 @@ char* redoTransaction(rvm_t rvm, char *cur, char *end)
     return cur;    
 }
 
-#ifdef __UDACITY__
-void truncateLog(rvm_t rvm_, unsigned long int id)
-#else
 void truncateLog(rvm_t rvm, unsigned long int id)
-#endif
 {
     char log_path[strlen(rvm->directory) + 20];
     int fd;
@@ -549,20 +513,12 @@ void removeMapping(void *segbase){
     free(segname);
 }
 
-#ifdef __UDACITY__
-int isDirty(rvm_t rvm_, const char *segname)
-#else
 int isDirty(rvm_t rvm, const char *segname)
-#endif
 {
     return seqsrchst_contains(&rvm->dirtyMap, (char*)segname);
 }
 
-#ifdef __UDACITY__
-void setDirty(rvm_t rvm_, const char *segname, int dirty)
-#else
 void setDirty(rvm_t rvm, const char *segname, int dirty)
-#endif
 {
 
     if(!dirty) {
@@ -588,21 +544,13 @@ void seqsrchst_destroy_key(seqsrchst_t *st){
   }  
 }
 
-#ifdef __UDACITY__
-void clearAllDirty(rvm_t rvm_)
-#else
 void clearAllDirty(rvm_t rvm)
-#endif
 {
     seqsrchst_destroy_key(&rvm->dirtyMap);
     seqsrchst_init(&rvm->dirtyMap, nameCMP);
 }
 
-#ifdef __UDACITY__
-void resetLog(rvm_t rvm_)
-#else
 void resetLog(rvm_t rvm)
-#endif
 {
     rvm->log_id_min = rvm->log_id = 0;
 

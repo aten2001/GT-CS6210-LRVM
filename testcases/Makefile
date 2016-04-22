@@ -1,6 +1,6 @@
 CFLAGS  = -Wall -g
 LFLAGS  =
-CC      = gcc
+CC      = g++
 RM      = /bin/rm -rf
 AR      = ar rc
 RANLIB  = ranlib
