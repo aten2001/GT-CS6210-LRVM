@@ -36,7 +36,7 @@ public:
     }
 
     ~RVM_transaction();
-    bool find(void* mem);
+    int find(void* mem);
     trans_t getID();
     void *getSeg(int k);
 

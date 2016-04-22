@@ -181,6 +181,7 @@ void rvm_commit_trans(trans_t tid){
         fwrite("TE", 1, 2, rvm->log_file);
         fflush(rvm->log_file);
         
+        transaction->log.erase(transaction->log.begin(), transaction->log.end());
         delete transaction;
     }
 }
@@ -455,10 +456,10 @@ bool RecoverableVM::eraseMap(void* mem){
     return true;
 }
 
-bool RVM_transaction::find(void* mem){
+int RVM_transaction::find(void* mem){
     for(int k=0; k<numsegs; k++)
-        if(mem == segbases[k]) return true;
-    return false;
+        if(mem == segbases[k]) return k;
+    return -1;
 }
 trans_t RVM_transaction::getID(){
     return id;

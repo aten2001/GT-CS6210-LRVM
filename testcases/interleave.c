@@ -1,6 +1,3 @@
-/* Involve a segment in multiple transactions, each transaction modifying a
- * region and either committing or aborting.  Check the final state. */
-
 #include "rvm.h"
 #include <unistd.h>
 #include <stdio.h>
@@ -10,10 +7,7 @@
 #include <assert.h>
 #include <sys/wait.h>
 
-/* create the situation where multiple transactions are started and stopped
- * (either aborted or committed) on a particular region, each transaction
- * modifying regions of the segment */
-void create() 
+void proc1() 
 {
      rvm_t rvm = rvm_init("rvm_segments");
      rvm_destroy(rvm, "testseg1");
@@ -43,9 +37,7 @@ void create()
      abort();
 }
 
-
-/* test the resulting segment */
-void test() 
+void proc2() 
 {
      char* segs[2];
      rvm_t rvm;
@@ -73,13 +65,13 @@ int main(int argc, char **argv)
        exit(2);
      }
      if(pid == 0) {
-       create();
+       proc1();
        exit(0);
      }
 
      waitpid(pid, NULL, 0);
 
-     test();
+     proc2();
 
      return 0;
 }

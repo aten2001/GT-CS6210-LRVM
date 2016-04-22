@@ -1,6 +1,3 @@
-/* Involve a segment in multiple transactions, each transaction modifying a
- * region and either committing or aborting.  Check the final state. */
-
 #include "rvm.h"
 #include <unistd.h>
 #include <stdio.h>
@@ -21,7 +18,6 @@ int main(int argc, char **argv)
      
      trans_t tid;
 
-     /* zero out */
      tid = rvm_begin_trans(rvm, 2, (void **) segs);
      rvm_about_to_modify(tid, segs[0], 0, 2);
      sprintf(segs[0], "a");
