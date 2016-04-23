@@ -1,10 +1,10 @@
-Log files are used to records the modification of the memory segments instead of directly modifying the memory.
+The modifications of memory mapped segments are recorded in log files instead of directly written to the segments on disk. RVM will truncate the log files to apply modifications to the segments on disk later.
 
 Log File Format
 |TB|# of Records|Segname1|offset1|length1|mem1|Segname2|offset2|...|TE|
 |TB|# of Records|Segname1|offset1|length1|mem1|TE|
 
 We truncate the redo log during several circumstances.
-1. During rvm_map. Once we detected that segname unmapped and modified by previous transaction, we call rvm_truncate_log to update segment.
+1. During rvm_map. Once we detected that a segment is modified by previous transactions and unmapped, we call rvm_truncate_log to update the segment.
 2. During rvm_commit. Once we detected that the log file is too big (>1M), we call rvm_truncate_log to clean up the log file.
 3. During rvm_init. We do a rvm_truncate_log when we initialize the rvm.
